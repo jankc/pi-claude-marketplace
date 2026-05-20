@@ -68,6 +68,7 @@
 
 import path from "node:path";
 
+import { resolveGitCredentials } from "../../domain/git-auth.ts";
 import { loadMarketplaceManifest } from "../../domain/manifest.ts";
 import { locationsFor } from "../../persistence/locations.ts";
 import { loadState } from "../../persistence/state-io.ts";
@@ -85,7 +86,7 @@ import { withStateGuard } from "../../transaction/with-state-guard.ts";
 import {
   DEFAULT_GIT_OPS,
   formatErrorWithCauses,
-  refreshGitHubClone,
+  refreshGitClone,
   renderPartition,
   resolveScopeFromState,
   type GitOps,
@@ -208,11 +209,22 @@ async function refreshRecord(
   const source = record.source as ParsedSource;
   let cloneAdvanced = false;
   try {
-    if (source.kind === "github") {
+    if (source.kind === "github" || source.kind === "git") {
       const cloneDir = await locations.sourceCloneDir(name);
-      await refreshGitHubClone(cloneDir, source.ref, gitOps, () => {
-        cloneAdvanced = true;
-      });
+      const cloneUrl =
+        source.kind === "github"
+          ? `https://github.com/${source.owner}/${source.repo}.git`
+          : source.url;
+      const credentials = resolveGitCredentials(cloneUrl);
+      await refreshGitClone(
+        cloneDir,
+        source.ref,
+        gitOps,
+        () => {
+          cloneAdvanced = true;
+        },
+        credentials,
+      );
       await validateManifestAtRoot(record, cloneDir);
     } else if (source.kind === "path") {
       await validateManifestAtRoot(record, record.marketplaceRoot);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  gitSource,
   githubSource,
   parsePluginSource,
   pathSource,
@@ -64,6 +65,16 @@ const ACCEPT_CASES: readonly AcceptCase[] = [
     expect: { kind: "github", owner: "o", repo: "r" },
   },
   {
+    name: "generic HTTPS git URL",
+    raw: "https://bitbucket.org/workspace/repo.git",
+    expect: { kind: "git", url: "https://bitbucket.org/workspace/repo.git" },
+  },
+  {
+    name: "generic HTTPS git URL with #ref",
+    raw: "https://gitlab.com/group/repo.git#main",
+    expect: { kind: "git", url: "https://gitlab.com/group/repo.git", ref: "main" },
+  },
+  {
     name: "SP-5 https github .git#empty fragment dropped",
     raw: "https://github.com/o/r.git#",
     expect: { kind: "github", owner: "o", repo: "r" },
@@ -91,9 +102,13 @@ const ACCEPT_CASES: readonly AcceptCase[] = [
 ];
 
 const REJECT_CASES: readonly RejectCase[] = [
-  { name: "SP-3 SSH git@", raw: "git@github.com:o/r.git", reasonContains: "not supported" },
-  { name: "SP-3 ssh:// scheme", raw: "ssh://git@github.com/o/r", reasonContains: "not supported" },
-  { name: "SP-3 non-github https", raw: "https://gitlab.com/o/r", reasonContains: "not supported" },
+  { name: "SP-3 SSH git@", raw: "git@github.com:o/r.git", reasonContains: "SSH Git URL" },
+  { name: "SP-3 ssh:// scheme", raw: "ssh://git@github.com/o/r", reasonContains: "SSH Git URL" },
+  {
+    name: "credential-bearing HTTPS URL",
+    raw: "https://user:token@gitlab.com/o/r.git",
+    reasonContains: "environment variables",
+  },
   {
     name: "SP-3 browser /tree/<ref>",
     raw: "https://github.com/o/r/tree/main",
@@ -155,6 +170,13 @@ test("SP-6 / ST-6 githubSource() returns GitHubSource for valid owner/repo", () 
   assert.equal(got.kind, "github");
   assert.equal(got.owner, "anthropics");
   assert.equal(got.repo, "claude-plugins-official");
+});
+
+test("gitSource() returns GitSource for valid HTTPS git input", () => {
+  const got = gitSource("https://bitbucket.org/workspace/repo.git#main");
+  assert.equal(got.kind, "git");
+  assert.equal(got.url, "https://bitbucket.org/workspace/repo.git");
+  assert.equal(got.ref, "main");
 });
 
 test("SP-6 githubSource() throws on non-github input with reason in message", () => {

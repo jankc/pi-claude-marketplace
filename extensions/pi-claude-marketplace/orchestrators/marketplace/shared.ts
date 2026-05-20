@@ -42,6 +42,7 @@ import * as defaultGit from "../../platform/git.ts";
 import { MarketplaceNotFoundError } from "../../shared/errors.ts";
 
 import type { UnstageAgentFailure } from "../../bridges/agents/types.ts";
+import type { GitCredentials } from "../../domain/git-auth.ts";
 import type { ScopedLocations } from "../../persistence/locations.ts";
 import type { ExtensionState } from "../../persistence/state-io.ts";
 import type { Scope } from "../../shared/types.ts";
@@ -80,9 +81,20 @@ export class AgentsUnstageFailureError extends Error {
  */
 export interface GitOps {
   /** MA-5: clone url into dir, optional ref, single-branch when ref is set. */
-  clone(opts: { dir: string; url: string; ref?: string; singleBranch?: boolean }): Promise<void>;
+  clone(opts: {
+    dir: string;
+    url: string;
+    ref?: string;
+    singleBranch?: boolean;
+    credentials?: GitCredentials;
+  }): Promise<void>;
   /** D-14 step 1: refresh remote refs (no merge, no working-tree changes). */
-  fetch(opts: { dir: string; remote?: string; ref?: string }): Promise<void>;
+  fetch(opts: {
+    dir: string;
+    remote?: string;
+    ref?: string;
+    credentials?: GitCredentials;
+  }): Promise<void>;
   /** D-14 step 2 (symbolic HEAD): force-set local branch ref to remote SHA. */
   forceUpdateRef(opts: { dir: string; ref: string; value: string }): Promise<void>;
   /** D-14 step 3: move HEAD to ref/SHA. */
@@ -125,16 +137,18 @@ export const DEFAULT_GIT_OPS: GitOps = {
  *       fetch + checkout (resolveRef of refs/remotes/origin/<ref> fails, then
  *       checkout throws if the SHA no longer exists).
  */
-export async function refreshGitHubClone(
+export async function refreshGitClone(
   cloneDir: string,
   storedRef: string | undefined,
   gitOps: GitOps,
   onFetchSucceeded?: () => void,
+  credentials?: GitCredentials,
 ): Promise<void> {
   await gitOps.fetch({
     dir: cloneDir,
     remote: "origin",
     ...(storedRef !== undefined && { ref: storedRef }),
+    ...(credentials !== undefined && { credentials }),
   });
   onFetchSucceeded?.();
 
@@ -179,6 +193,8 @@ export async function refreshGitHubClone(
     await gitOps.checkout({ dir: cloneDir, ref: storedRef });
   }
 }
+
+export const refreshGitHubClone = refreshGitClone;
 
 export function renderPartition(
   lines: string[],

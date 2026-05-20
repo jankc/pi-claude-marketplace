@@ -189,7 +189,8 @@ function samePlannedSource(stored: unknown, plannedRaw: string): boolean | "unkn
       );
     case "path":
       return current.kind === "path" && planned.logical === current.logical;
-    /* c8 ignore next 3 -- import planner only generates path/github sources */
+    /* c8 ignore next 4 -- import planner only generates path/github sources */
+    case "git":
     case "url":
     case "git-subdir":
     case "npm":

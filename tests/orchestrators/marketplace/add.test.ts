@@ -123,6 +123,60 @@ test("MA-5: github HTTPS source with #ref clones the canonical repo URL at that 
   });
 });
 
+test("generic HTTPS git source clones direct URL, passes env credentials, and persists no credentials", async () => {
+  await withTmpScope(async ({ cwd, locations }) => {
+    const oldUser = process.env.PI_CLAUDE_MARKETPLACE_BITBUCKET_USERNAME;
+    const oldToken = process.env.PI_CLAUDE_MARKETPLACE_BITBUCKET_TOKEN;
+    process.env.PI_CLAUDE_MARKETPLACE_BITBUCKET_USERNAME = "bb-user";
+    process.env.PI_CLAUDE_MARKETPLACE_BITBUCKET_TOKEN = "bb-token";
+    try {
+      const { ctx } = makeCtx();
+      const { gitOps, state } = makeMockGitOps({
+        fixtureSourceDir: fixtureMarketplaceDir("valid-marketplace"),
+      });
+
+      await addMarketplace({
+        ctx,
+        scope: "project",
+        cwd,
+        rawSource: "https://bitbucket.org/workspace/repo.git#main",
+        gitOps,
+      });
+
+      assert.deepEqual(state.cloneCalls[0], {
+        dir: state.cloneCalls[0]?.dir,
+        url: "https://bitbucket.org/workspace/repo.git",
+        ref: "main",
+        singleBranch: true,
+        credentials: { username: "bb-user", token: "bb-token" },
+      });
+
+      const persisted = await loadState(locations.extensionRoot);
+      const source = persisted.marketplaces["valid-marketplace"]?.source;
+      assert.deepEqual(source, {
+        kind: "git",
+        raw: "https://bitbucket.org/workspace/repo.git#main",
+        url: "https://bitbucket.org/workspace/repo.git",
+        ref: "main",
+      });
+      assert.equal(JSON.stringify(persisted).includes("bb-token"), false);
+      assert.equal(JSON.stringify(persisted).includes("bb-user"), false);
+    } finally {
+      if (oldUser === undefined) {
+        delete process.env.PI_CLAUDE_MARKETPLACE_BITBUCKET_USERNAME;
+      } else {
+        process.env.PI_CLAUDE_MARKETPLACE_BITBUCKET_USERNAME = oldUser;
+      }
+
+      if (oldToken === undefined) {
+        delete process.env.PI_CLAUDE_MARKETPLACE_BITBUCKET_TOKEN;
+      } else {
+        process.env.PI_CLAUDE_MARKETPLACE_BITBUCKET_TOKEN = oldToken;
+      }
+    }
+  });
+});
+
 test("MA-6: pre-existing non-empty sources/<name>/ throws StaleSourceCloneError", async () => {
   await withTmpScope(async ({ cwd, locations }) => {
     const { ctx } = makeCtx();

@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  gitSource,
   githubSource,
   pathSource,
 } from "../../../extensions/pi-claude-marketplace/domain/source.ts";
@@ -522,6 +523,62 @@ test("RH-1: NO reload hint when zero plugins updated", async () => {
     const first = notifications[0];
     assert.ok(first !== undefined);
     assert.equal(first.message.includes("Run /reload to "), false);
+  });
+});
+
+test("generic Git marketplace update refreshes clone and passes env credentials", async () => {
+  await withHermeticHome(async ({ cwd }) => {
+    const locations = locationsFor("project", cwd);
+    await mkdir(locations.extensionRoot, { recursive: true });
+    const oldUser = process.env.PI_CLAUDE_MARKETPLACE_GITLAB_USERNAME;
+    const oldToken = process.env.PI_CLAUDE_MARKETPLACE_GITLAB_TOKEN;
+    process.env.PI_CLAUDE_MARKETPLACE_GITLAB_USERNAME = "gl-user";
+    process.env.PI_CLAUDE_MARKETPLACE_GITLAB_TOKEN = "gl-token";
+    try {
+      const cloneDir = await locations.sourceCloneDir("gitlab-mp");
+      await cp(fixtureMarketplaceDir("valid-marketplace"), cloneDir, { recursive: true });
+      await saveState(locations.extensionRoot, {
+        schemaVersion: 1,
+        marketplaces: {
+          "gitlab-mp": {
+            name: "gitlab-mp",
+            scope: "project",
+            source: gitSource("https://gitlab.com/group/repo.git#main"),
+            addedFromCwd: cwd,
+            manifestPath: path.join(cloneDir, ".claude-plugin", "marketplace.json"),
+            marketplaceRoot: cloneDir,
+            plugins: {},
+          },
+        },
+      });
+
+      const { ctx } = makeCtx();
+      const { gitOps, state } = makeMockGitOps({
+        remoteRefs: { "refs/remotes/origin/main": "1111111111111111111111111111111111111111" },
+        localRefs: { "refs/heads/main": "0000000000000000000000000000000000000001" },
+      });
+
+      await updateMarketplace({ ctx, name: "gitlab-mp", scope: "project", cwd, gitOps });
+
+      assert.deepEqual(state.fetchCalls[0], {
+        dir: cloneDir,
+        remote: "origin",
+        ref: "main",
+        credentials: { username: "gl-user", token: "gl-token" },
+      });
+    } finally {
+      if (oldUser === undefined) {
+        delete process.env.PI_CLAUDE_MARKETPLACE_GITLAB_USERNAME;
+      } else {
+        process.env.PI_CLAUDE_MARKETPLACE_GITLAB_USERNAME = oldUser;
+      }
+
+      if (oldToken === undefined) {
+        delete process.env.PI_CLAUDE_MARKETPLACE_GITLAB_TOKEN;
+      } else {
+        process.env.PI_CLAUDE_MARKETPLACE_GITLAB_TOKEN = oldToken;
+      }
+    }
   });
 });
 

@@ -44,6 +44,7 @@ import { mkdir, rename, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { resolveGitCredentials } from "../../domain/git-auth.ts";
 import { loadMarketplaceManifest } from "../../domain/manifest.ts";
 import { parsePluginSource } from "../../domain/source.ts";
 import { locationsFor } from "../../persistence/locations.ts";
@@ -60,7 +61,7 @@ import { withStateGuard } from "../../transaction/with-state-guard.ts";
 
 import { DEFAULT_GIT_OPS, type GitOps } from "./shared.ts";
 
-import type { GitHubSource, PathSource } from "../../domain/source.ts";
+import type { GitSource, GitHubSource, PathSource } from "../../domain/source.ts";
 import type { ScopedLocations } from "../../persistence/locations.ts";
 import type { ExtensionState } from "../../persistence/state-io.ts";
 import type { ExtensionContext } from "../../platform/pi-api.ts";
@@ -88,7 +89,7 @@ export async function addMarketplace(opts: AddMarketplaceOptions): Promise<void>
     throw new Error(`Cannot add marketplace from "${opts.rawSource}": ${source.reason}`);
   }
 
-  if (source.kind !== "github" && source.kind !== "path") {
+  if (source.kind !== "github" && source.kind !== "git" && source.kind !== "path") {
     throw new Error(
       `Cannot add marketplace from "${opts.rawSource}": unsupported source kind ${source.kind}`,
     );
@@ -96,8 +97,8 @@ export async function addMarketplace(opts: AddMarketplaceOptions): Promise<void>
 
   let recordedName: string | undefined;
   await withStateGuard(locations, async (state) => {
-    if (source.kind === "github") {
-      recordedName = await addGithubInGuard({
+    if (source.kind === "github" || source.kind === "git") {
+      recordedName = await addRemoteGitInGuard({
         state,
         locations,
         source,
@@ -142,16 +143,18 @@ export async function addMarketplace(opts: AddMarketplaceOptions): Promise<void>
   notifySuccess(opts.ctx, `Added marketplace "${recordedName}" in ${opts.scope} scope.`);
 }
 
-async function addGithubInGuard(args: {
+async function addRemoteGitInGuard(args: {
   state: ExtensionState;
   locations: ScopedLocations;
-  source: GitHubSource;
+  source: GitHubSource | GitSource;
   gitOps: GitOps;
   cwd: string;
 }): Promise<string> {
   const { state, locations, source, gitOps, cwd } = args;
   const stagingDir = await locations.sourcesStagingDir(randomUUID());
-  const cloneUrl = `https://github.com/${source.owner}/${source.repo}.git`;
+  const cloneUrl =
+    source.kind === "github" ? `https://github.com/${source.owner}/${source.repo}.git` : source.url;
+  const credentials = resolveGitCredentials(cloneUrl);
 
   // 1. Clone into staging (NFR-5: only github branch reaches gitOps.clone).
   try {
@@ -159,6 +162,7 @@ async function addGithubInGuard(args: {
       dir: stagingDir,
       url: cloneUrl,
       ...(source.ref !== undefined && { ref: source.ref, singleBranch: true }),
+      ...(credentials !== undefined && { credentials }),
     });
   } catch (err) {
     // Clone itself failed -- there is no staging dir to clean up beyond a

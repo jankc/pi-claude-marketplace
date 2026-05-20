@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  gitSource,
   githubSource,
   pathSource,
 } from "../../../extensions/pi-claude-marketplace/domain/source.ts";
@@ -121,6 +122,35 @@ test("ML-2: github source renders canonical URL", async () => {
       notifications[0]!.message,
       /● official \(https:\/\/github\.com\/anthropics\/claude-plugins-official\)/,
     );
+  });
+});
+
+test("ML-2: generic Git source renders URL without credentials", async () => {
+  await withHermeticHome(async ({ cwd }) => {
+    const projectLocations = locationsFor("project", cwd);
+    await mkdir(projectLocations.extensionRoot, { recursive: true });
+    await saveState(projectLocations.extensionRoot, {
+      schemaVersion: 1,
+      marketplaces: {
+        private: {
+          name: "private",
+          scope: "project",
+          source: gitSource("https://gitlab.com/group/repo.git#main"),
+          addedFromCwd: cwd,
+          manifestPath: path.join(cwd, "marketplace.json"),
+          marketplaceRoot: cwd,
+          plugins: {},
+        },
+      },
+    });
+
+    const { ctx, notifications } = makeCtx();
+    await listMarketplaces({ ctx, scope: "project", cwd });
+    assert.match(
+      notifications[0]!.message,
+      /● private \(https:\/\/gitlab\.com\/group\/repo\.git#main\)/,
+    );
+    assert.equal(notifications[0]!.message.includes("token"), false);
   });
 });
 

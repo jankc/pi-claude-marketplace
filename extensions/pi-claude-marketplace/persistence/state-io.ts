@@ -28,7 +28,7 @@ import path from "node:path";
 import Type from "typebox";
 import { Compile } from "typebox/compile";
 
-import { githubSource, parsePluginSource, pathSource } from "../domain/source.ts";
+import { gitSource, githubSource, parsePluginSource, pathSource } from "../domain/source.ts";
 import { atomicWriteJson } from "../shared/atomic-json.ts";
 import { errorMessage } from "../shared/errors.ts";
 
@@ -129,6 +129,10 @@ function normalizeStoredSource(mpName: string, mp: Record<string, unknown>): voi
     mp.source = pathSource(obj.raw);
   } else if (obj.kind === "github" && typeof obj.raw === "string") {
     mp.source = githubSource(obj.raw);
+  } else if (obj.kind === "git" && typeof (obj as { url?: unknown }).url === "string") {
+    const gitObj = obj as { url: string; ref?: unknown };
+    const ref = typeof gitObj.ref === "string" ? gitObj.ref : undefined;
+    mp.source = gitSource(ref === undefined ? gitObj.url : `${gitObj.url}#${ref}`);
   } else if (obj.kind !== "unknown") {
     throw new Error(
       `state.json marketplace "${mpName}" has malformed source object (missing kind/raw)`,

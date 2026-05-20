@@ -21,6 +21,7 @@
 import { cp, mkdir } from "node:fs/promises";
 import path from "node:path";
 
+import type { GitCredentials } from "../../extensions/pi-claude-marketplace/domain/git-auth.ts";
 import type { GitOps } from "../../extensions/pi-claude-marketplace/orchestrators/marketplace/shared.ts";
 
 export interface MockGitState {
@@ -45,8 +46,14 @@ export interface MockGitState {
    * the default localRefs (or undefined if none).
    */
   currentBranchOverride?: string | null;
-  cloneCalls: { dir: string; url: string; ref?: string; singleBranch?: boolean }[];
-  fetchCalls: { dir: string; remote?: string; ref?: string }[];
+  cloneCalls: {
+    dir: string;
+    url: string;
+    ref?: string;
+    singleBranch?: boolean;
+    credentials?: GitCredentials;
+  }[];
+  fetchCalls: { dir: string; remote?: string; ref?: string; credentials?: GitCredentials }[];
   forceUpdateRefCalls: { dir: string; ref: string; value: string }[];
   checkoutCalls: { dir: string; ref: string }[];
   resolveRefCalls: { dir: string; ref: string }[];

@@ -28,18 +28,25 @@ import http from "isomorphic-git/http/node";
  * Phase 4 will be its first caller.
  */
 
+export interface GitCredentials {
+  readonly username: string;
+  readonly token: string;
+}
+
 export interface CloneOptions {
   /**
    * Working-tree directory. Must be on the same filesystem as its destination
    * parent if the caller plans to atomic-rename a clone into place.
    */
   dir: string;
-  /** Remote URL -- V1 accepts only https://github.com/<owner>/<repo>[.git] (SP-3). */
+  /** Remote URL -- HTTPS Git remote. */
   url: string;
   /** Optional ref (branch/tag/SHA) to check out. If omitted, the default branch. */
   ref?: string;
   /** If a specific ref is given, fetch only that branch -- saves bandwidth. */
   singleBranch?: boolean;
+  /** Optional HTTPS credentials resolved from environment variables. */
+  credentials?: GitCredentials;
 }
 
 export interface FetchOptions {
@@ -48,6 +55,8 @@ export interface FetchOptions {
   remote?: string;
   /** Optional ref to fetch. */
   ref?: string;
+  /** Optional HTTPS credentials resolved from environment variables. */
+  credentials?: GitCredentials;
 }
 
 export interface PullOptions {
@@ -103,7 +112,8 @@ export async function clone(opts: CloneOptions): Promise<void> {
     url: opts.url,
     ...(opts.ref !== undefined && { ref: opts.ref }),
     ...(opts.singleBranch !== undefined && { singleBranch: opts.singleBranch }),
-    // No depth (V1 keeps full history). No corsProxy (Node only). No onAuth (public).
+    ...(opts.credentials !== undefined && { onAuth: authCallback(opts.credentials) }),
+    // No depth (V1 keeps full history). No corsProxy (Node only).
   });
 }
 
@@ -114,7 +124,12 @@ export async function fetch(opts: FetchOptions): Promise<git.FetchResult> {
     dir: opts.dir,
     ...(opts.remote !== undefined && { remote: opts.remote }),
     ...(opts.ref !== undefined && { ref: opts.ref }),
+    ...(opts.credentials !== undefined && { onAuth: authCallback(opts.credentials) }),
   });
+}
+
+function authCallback(credentials: GitCredentials): () => { username: string; password: string } {
+  return () => ({ username: credentials.username, password: credentials.token });
 }
 
 export async function pull(opts: PullOptions): Promise<void> {

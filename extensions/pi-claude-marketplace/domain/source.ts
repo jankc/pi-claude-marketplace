@@ -36,6 +36,13 @@ export interface GitHubSource {
   readonly sha?: string;
 }
 
+export interface GitSource {
+  readonly kind: "git";
+  readonly raw: string;
+  readonly url: string;
+  readonly ref?: string;
+}
+
 export interface UrlSource {
   readonly kind: "url";
   readonly raw: string;
@@ -70,6 +77,7 @@ export interface UnknownSource {
 export type ParsedSource =
   | PathSource
   | GitHubSource
+  | GitSource
   | UrlSource
   | GitSubdirSource
   | NpmSource
@@ -80,7 +88,15 @@ const TILDE_USER_HINT = "per-user tilde (~user/...) is not supported; use ~/..."
 
 /** SSH/other-URL reject message (SP-3). */
 function unsupportedUrlReason(raw: string): string {
-  return `${raw} is not supported; only github URLs and local paths are accepted`;
+  return `${raw} is not supported; only github URLs, HTTPS git URLs, and local paths are accepted`;
+}
+
+function sshUrlReason(raw: string): string {
+  return `${raw} is an SSH Git URL, which is unsupported; use an HTTPS Git URL with PI_CLAUDE_MARKETPLACE_* environment credentials instead`;
+}
+
+function credentialUrlReason(raw: string): string {
+  return `${raw} contains credentials; use PI_CLAUDE_MARKETPLACE_* environment variables instead`;
 }
 
 /** owner/repo@<ref> reject message (SP-2). */
@@ -183,6 +199,13 @@ function parseKindObjectSource(raw: Record<string, unknown>, kind: string): Pars
         : githubObjectSource(value, raw);
     }
 
+    case "git": {
+      const value = optionalString(raw, "url") ?? optionalString(raw, "raw");
+      return value === undefined
+        ? unknownObjectSource(raw, "git source is missing url")
+        : gitSource(withOptionalFragment(value, optionalString(raw, "ref")));
+    }
+
     case "url":
       return urlObjectSource(raw);
 
@@ -266,13 +289,21 @@ export function parsePluginSource(raw: unknown): ParsedSource {
     return { kind: "path", raw, logical: raw };
   }
 
+  if (isSshGitUrl(raw)) {
+    return { kind: "unknown", raw, reason: sshUrlReason(raw) };
+  }
+
   // GitHub HTTPS URL
   if (raw.startsWith("https://github.com/")) {
     return parseGitHubUrl(raw);
   }
 
-  // SP-3: SSH and arbitrary URL schemes
-  if (raw.startsWith("git@") || raw.includes("://")) {
+  if (raw.startsWith("https://")) {
+    return parseGenericGitUrl(raw);
+  }
+
+  // SP-3: arbitrary URL schemes
+  if (raw.includes("://")) {
     return { kind: "unknown", raw, reason: unsupportedUrlReason(raw) };
   }
 
@@ -295,6 +326,33 @@ export function parsePluginSource(raw: unknown): ParsedSource {
 
   // MM-4: anything else (foo/bar/baz, foo, "", whitespace-only, etc.) is unknown
   return { kind: "unknown", raw, reason: nonRelativeReason(raw) };
+}
+
+function isSshGitUrl(raw: string): boolean {
+  return raw.startsWith("git@") || raw.startsWith("ssh://");
+}
+
+function withOptionalFragment(url: string, ref: string | undefined): string {
+  return ref === undefined || url.includes("#") ? url : `${url}#${ref}`;
+}
+
+function parseGenericGitUrl(raw: string): ParsedSource {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return { kind: "unknown", raw, reason: unsupportedUrlReason(raw) };
+  }
+
+  if (parsed.username !== "" || parsed.password !== "") {
+    return { kind: "unknown", raw, reason: credentialUrlReason(raw) };
+  }
+
+  const ref = parsed.hash.length > 1 ? decodeURIComponent(parsed.hash.slice(1)) : undefined;
+  parsed.hash = "";
+  return ref === undefined
+    ? { kind: "git", raw, url: parsed.toString() }
+    : { kind: "git", raw, url: parsed.toString(), ref };
 }
 
 function parseGitHubUrl(raw: string): ParsedSource {
@@ -375,6 +433,16 @@ export function githubSource(raw: string): GitHubSource {
   return parsed;
 }
 
+export function gitSource(raw: string): GitSource {
+  const parsed = parsePluginSource(raw);
+  if (parsed.kind !== "git") {
+    const detail = parsed.kind === "unknown" ? parsed.reason : `wrong kind: ${parsed.kind}`;
+    throw new Error(`Not a git source: ${raw} -- ${detail}`);
+  }
+
+  return parsed;
+}
+
 /**
  * ML-2 / list-format helper. Returns the user-visible logical source label
  * for the `marketplace list` renderer.
@@ -394,6 +462,11 @@ export function sourceLogical(source: ParsedSource): string {
     case "github": {
       const refSuffix = source.ref === undefined ? "" : `#${source.ref}`;
       return `https://github.com/${source.owner}/${source.repo}${refSuffix}`;
+    }
+
+    case "git": {
+      const refSuffix = source.ref === undefined ? "" : `#${source.ref}`;
+      return `${source.url}${refSuffix}`;
     }
 
     case "url": {
